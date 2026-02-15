@@ -1,0 +1,16 @@
+.vscode/
+wandb/
+results/
+checkpoints/
+logs/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.pytest_cache/
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local

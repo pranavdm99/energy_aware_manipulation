@@ -1,0 +1,34 @@
+# Core RL
+stable-baselines3[extra]>=2.3.0
+gymnasium>=0.29.0
+
+# Robosuite (MuJoCo-based robot simulation)
+robosuite>=1.4.1
+mujoco>=3.0.0
+h5py>=3.10.0
+
+# PyTorch (CUDA 12.1 — installed separately in Dockerfile for GPU support)
+# torch is installed via pip index in Dockerfile
+
+# Language conditioning
+sentence-transformers>=2.2.0
+
+# Visualization & video recording
+wandb>=0.16.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+imageio>=2.30.0
+imageio-ffmpeg>=0.4.9
+pandas>=2.1.0
+
+# Config management
+pyyaml>=6.0
+hydra-core>=1.3.0
+
+# Testing
+pytest>=7.4.0
+
+# Utilities
+numpy>=1.24.0
+tqdm>=4.66.0
+tensorboard>=2.15.0

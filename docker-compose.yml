@@ -1,0 +1,44 @@
+services:
+  energy-manip:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: energy_aware_manipulation
+
+    # GPU access
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    # Mount project folder + X11 socket for live rendering
+    volumes:
+      - .:/workspace
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${HOME}/.Xauthority:/root/.Xauthority:ro
+
+    # Keep container running for interactive use
+    stdin_open: true
+    tty: true
+
+    # Environment variables
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+      - DISPLAY=${DISPLAY}
+      - WANDB_MODE=online
+
+    # Allow X11 access
+    network_mode: host
+
+    # Shared memory for PyTorch DataLoader
+    shm_size: "4g"
+
+    # Working directory inside container
+    working_dir: /workspace
+
+    # Default command
+    command: bash

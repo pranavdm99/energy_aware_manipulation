@@ -1,0 +1,51 @@
+environment:
+  task: "Lift"
+  robots: "Panda"
+  controller: "OSC_POSE"
+  horizon: 500
+  reward_shaping: true
+
+training:
+  algorithm: "SAC"
+  total_timesteps: 500000
+  learning_rate: 3.0e-4
+  buffer_size: 1000000
+  batch_size: 512
+  tau: 0.005
+  gamma: 0.99
+  n_envs: 4
+  train_freq: 1
+  gradient_steps: 4
+  learning_starts: 1000
+  seed: 42
+  policy_kwargs:
+    net_arch: [256, 256]
+
+energy:
+  weight: 0.0
+  normalize_by_dof: true
+  include_in_obs: false
+
+language:
+  enabled: false
+  model: "all-MiniLM-L6-v2"
+  descriptor: "normally"
+  descriptor_map:
+    gently: 0.1
+    carefully: 0.1
+    normally: 0.05
+    quickly: 0.01
+    efficiently: 0.01
+
+logging:
+  wandb_project: "energy-aware-manipulation"
+  wandb_mode: "online"  # set to "offline" or pass --wandb-mode offline to disable syncing
+  log_interval: 1000
+  eval_freq: 10000
+  n_eval_episodes: 20
+  save_freq: 50000
+
+paths:
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"
+  results_dir: "results"
