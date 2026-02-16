@@ -1,6 +1,6 @@
 # Energy-Aware, Language-Conditioned Manipulation
 
-A research-grade RL project training a **Franka Panda** arm in **robosuite** (MuJoCo) to perform manipulation tasks while jointly optimizing **task success** and **mechanical energy efficiency**, with optional **language conditioning** for semantic modulation of motion style.
+This project involves training a **Franka Panda** arm in **Robosuite** (MuJoCo) to perform manipulation tasks while jointly optimizing **task success** and **mechanical energy efficiency**, with optional **language conditioning** for semantic modulation of motion style.
 
 ## Quick Start (Docker)
 
@@ -31,7 +31,6 @@ python scripts/train.py --task Lift --energy-weight 0.0 --total-timesteps 5000
 
 ```
 energy_aware_manipulation/
-├── Dockerfile / docker-compose.yml   # GPU-accelerated dev container
 ├── configs/
 │   ├── default.yaml                  # Base hyperparameters
 │   └── ablation_sweep.yaml           # Sweep configurations
@@ -50,10 +49,8 @@ energy_aware_manipulation/
 │   ├── metrics.py                    # Physics computations
 │   ├── language_encoder.py           # Sentence-BERT encoder
 │   └── logging_utils.py              # WandB callback
-└── tests/
-    ├── test_metrics.py
-    ├── test_energy_wrapper.py
-    └── test_language_wrapper.py
+├── Dockerfile
+└── docker-compose.yml
 ```
 
 ## Training
@@ -100,10 +97,10 @@ r_energy = -mean(|τ_i · ω_i|)   # negative instantaneous power
 - Descriptor maps to energy weight: `"gently" → α=0.1`, `"quickly" → α=0.01`
 
 ## Key Metrics
-| Metric | Description |
-|--------|-------------|
-| Success Rate | Task completion over N episodes |
-| Total Energy | Σ\|τ·ω\|·Δt over episode |
-| Peak Torque | max\|τ\| over episode |
-| Jerk | Σ\|d³x/dt³\| — motion smoothness |
-| Episode Length | Steps to completion |
+| Metric         | Description                      |
+| -------------- | -------------------------------- |
+| Success Rate   | Task completion over N episodes  |
+| Total Energy   | Σ\|τ·ω\|·Δt over episode         |
+| Peak Torque    | max\|τ\| over episode            |
+| Jerk           | Σ\|d³x/dt³\| — motion smoothness |
+| Episode Length | Steps to completion              |

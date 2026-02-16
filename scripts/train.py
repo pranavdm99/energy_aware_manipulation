@@ -12,6 +12,7 @@ import argparse
 import os
 import sys
 import yaml
+import time
 
 # Headless rendering for parallel envs
 os.environ.setdefault("MUJOCO_GL", "osmesa")
@@ -172,12 +173,12 @@ def main():
     lang_tag = ""
     if config["language"]["enabled"]:
         lang_tag = f"_lang-{config['language']['descriptor']}"
-    run_name = f"{task}_alpha{energy_w}{lang_tag}_seed{seed}"
+    run_name = f"{task}_alpha{energy_w}{lang_tag}_seed{seed}_{int(time.time())}"
 
     # --- Init WandB ---
-    # Config wins if it has wandb_mode; otherwise CLI (e.g. --wandb-mode online) is used
+    # Use explicit CLI/config mode if set; otherwise let init_wandb read WANDB_MODE env var
     logging_cfg = config.get("logging", {})
-    wandb_mode = logging_cfg.get("wandb_mode", args.wandb_mode)
+    wandb_mode = logging_cfg.get("wandb_mode", None)  # None = respect WANDB_MODE env var
     init_wandb(
         project=logging_cfg.get("wandb_project", "energy-aware-manipulation"),
         config=config,

@@ -137,6 +137,19 @@ def train_agent(
     # --- Build callbacks ---
     callbacks = []
 
+    # WandB callback for SB3 native metrics (actor_loss, critic_loss, etc.)
+    try:
+        from wandb.integration.sb3 import WandbCallback
+        import wandb as _wandb
+        if _wandb.run is not None:
+            wandb_cb = WandbCallback(
+                model_save_path=None,  # we handle saving separately
+                verbose=verbose,
+            )
+            callbacks.append(wandb_cb)
+    except ImportError:
+        pass  # WandB integration not available
+
     # Energy logging to WandB
     energy_cb = EnergyLoggingCallback(log_freq=log_freq, verbose=verbose)
     callbacks.append(energy_cb)

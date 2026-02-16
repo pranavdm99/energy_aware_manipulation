@@ -12,7 +12,7 @@ import os
 import subprocess
 import sys
 import yaml
-
+import time
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run ablation sweep")
@@ -54,7 +54,7 @@ def main():
             "--checkpoint-dir", f"checkpoints/sweep",
         ]
 
-        run_name = f"{task}_alpha{alpha}_seed{seed}"
+        run_name = f"{task}_alpha{alpha}_seed{seed}_{int(time.time())}"
         print(f"[{i + 1}/{len(combinations)}] {run_name}")
         print(f"  Command: {' '.join(cmd)}")
 

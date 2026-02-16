@@ -4,6 +4,7 @@ WandB logging callback for Stable-Baselines3.
 Logs energy metrics, reward components, and success rates during training.
 """
 
+import os
 import numpy as np
 import wandb
 from stable_baselines3.common.callbacks import BaseCallback
@@ -39,11 +40,11 @@ class EnergyLoggingCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         """Called at each environment step."""
-        # VecEnv returns list of infos; single env may pass a single dict
+        # VecEnv returns a tuple of infos (SubprocVecEnv) or list (DummyVecEnv)
         raw_infos = self.locals.get("infos", self.locals.get("info"))
         if isinstance(raw_infos, dict):
             raw_infos = [raw_infos]
-        infos = raw_infos if isinstance(raw_infos, list) else []
+        infos = list(raw_infos) if isinstance(raw_infos, (list, tuple)) else []
 
         # Lazy-init per-env accumulators
         n_envs = len(infos)
@@ -59,8 +60,22 @@ class EnergyLoggingCallback(BaseCallback):
                     "reward_energy_penalty", 0.0
                 )
 
-            # Episode end: use our wrapper's episode_summary (Monitor's "episode" key is not set without Monitor wrapper)
+            # Episode end detection:
+            # - DummyVecEnv: episode_summary is in info["energy"]
+            # - SubprocVecEnv: auto-resets on done, terminal info moves to
+            #   info["terminal_info"] (SB3 >= 2.0) or info["terminal_observation"]
             ep_summary = energy_info.get("episode_summary")
+
+            # Check terminal_info for SubprocVecEnv auto-reset
+            if ep_summary is None:
+                terminal_info = info.get("terminal_info", {})
+                if isinstance(terminal_info, dict):
+                    terminal_energy = terminal_info.get("energy", {})
+                    ep_summary = terminal_energy.get("episode_summary")
+                    # Also get is_success from terminal info
+                    if ep_summary is not None and "is_success" not in info:
+                        info["is_success"] = terminal_info.get("is_success", False)
+
             if ep_summary is not None:
                 self._episode_rewards_task.append(self._step_reward_task_per_env[i])
                 self._episode_rewards_energy.append(self._step_reward_energy_per_env[i])
@@ -105,6 +120,15 @@ class EnergyLoggingCallback(BaseCallback):
             "performance/total_episodes": n,
         }
 
+        # Also forward SB3's native training metrics (train/*, time/*)
+        if hasattr(self, "model") and hasattr(self.model, "logger"):
+            sb3_logger = self.model.logger
+            if hasattr(sb3_logger, "name_to_value"):
+                for key, value in sb3_logger.name_to_value.items():
+                    # Forward train/ and time/ prefixed metrics
+                    if key.startswith(("train/", "time/")):
+                        metrics[key] = value
+
         if wandb.run is not None:
             wandb.log(metrics, step=self.num_timesteps)
 
@@ -125,7 +149,7 @@ def init_wandb(
     project: str = "energy-aware-manipulation",
     config: Optional[Dict[str, Any]] = None,
     run_name: Optional[str] = None,
-    mode: str = "offline",
+    mode: Optional[str] = None,
 ) -> None:
     """Initialize WandB run.
 
@@ -133,8 +157,14 @@ def init_wandb(
         project: WandB project name.
         config: Configuration dict to log.
         run_name: Optional run name (auto-generated if None).
-        mode: 'online', 'offline', or 'disabled'.
+        mode: 'online', 'offline', or 'disabled'. If None, uses the
+              WANDB_MODE environment variable (default: 'online').
     """
+    # Respect WANDB_MODE env var when mode is not explicitly set
+    if mode is None:
+        mode = os.environ.get("WANDB_MODE", "online")
+
+    print(f"[INFO] Running in WANDB {mode} mode")
     wandb.init(
         project=project,
         config=config,
