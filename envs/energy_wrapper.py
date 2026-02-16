@@ -128,6 +128,8 @@ class EnergyAwareWrapper(gym.Wrapper):
         # Reset episode accumulators
         self._episode_energy = 0.0
         self._episode_peak_torque = 0.0
+        self._episode_jerk = 0.0
+        self._episode_max_contact_force = 0.0
         self._episode_torques = []
         self._episode_positions = []
         self._step_count = 0
@@ -153,6 +155,7 @@ class EnergyAwareWrapper(gym.Wrapper):
 
         # --- Extract physics data ---
         torques, velocities = self._get_torques_and_velocities()
+        sim = self._robosuite_env.sim
 
         # --- Compute energy penalty ---
         penalty, power_per_joint = self._compute_energy_penalty(
@@ -167,9 +170,52 @@ class EnergyAwareWrapper(gym.Wrapper):
             self._episode_peak_torque, np.max(np.abs(torques))
         )
         self._episode_torques.append(torques.copy())
-        self._episode_positions.append(
-            self._robosuite_env.sim.data.qpos[: self._n_dof].copy()
-        )
+        
+        # Current joint positions
+        current_pos = sim.data.qpos[: self._n_dof].copy()
+        self._episode_positions.append(current_pos)
+
+        # --- Compute Jerk ---
+        jerk = 0.0
+        if len(self._episode_positions) >= 4:
+            p = self._episode_positions
+            j_vec = (p[-1] - 3*p[-2] + 3*p[-3] - p[-4]) / (self._dt ** 3)
+            jerk = np.mean(np.abs(j_vec))
+        self._episode_jerk += jerk
+
+        # --- Extract Contact Forces ---
+        max_contact_force = 0.0
+        for i in range(sim.data.ncon):
+            contact = sim.data.contact[i]
+            # Use efc_force which is directly available in MjData
+            # Note: contact.efc_address points to the start of the force vector in efc_force
+            if contact.efc_address >= 0:
+                force = sim.data.efc_force[contact.efc_address : contact.efc_address + 3]
+                max_contact_force = max(max_contact_force, np.linalg.norm(force))
+        self._episode_max_contact_force = max(self._episode_max_contact_force, max_contact_force)
+
+        # --- Track Stage Progress (for Lift task) ---
+        is_success = bool(self._robosuite_env._check_success())
+        
+        # Get cube and gripper positions
+        try:
+            # Try to find the object body - Lift uses 'cube_main'
+            obj_name = "cube_main" if "cube_main" in sim.model.body_names else "cube"
+            if obj_name not in sim.model.body_names:
+                for name in sim.model.body_names:
+                    if "cube" in name or "object" in name:
+                        obj_name = name
+                        break
+            
+            cube_pos = sim.data.body_xpos[sim.model.body_name2id(obj_name)]
+            gripper_pos = sim.data.site_xpos[sim.model.site_name2id("gripper0_grip_site")]
+            dist = np.linalg.norm(cube_pos - gripper_pos)
+            
+            is_reached = dist < 0.05
+            is_grasped = is_reached and (cube_pos[2] > 0.82)
+        except (ValueError, KeyError):
+            is_reached = False
+            is_grasped = False
 
         # --- Modify reward ---
         reward_total = reward_task + self.energy_weight * penalty
@@ -183,14 +229,18 @@ class EnergyAwareWrapper(gym.Wrapper):
             "step_energy": step_energy,
             "cumulative_energy": self._episode_energy,
             "peak_torque": self._episode_peak_torque,
-            "torques": torques.tolist(),
-            "power_per_joint": power_per_joint.tolist(),
+            "step_jerk": jerk,
+            "max_contact_force": max_contact_force,
+            "is_reached": bool(is_reached),
+            "is_grasped": bool(is_grasped),
+            "is_success": is_success,
             "energy_weight": self.energy_weight,
-            "is_success": bool(self._robosuite_env._check_success()),
         }
 
-        # Ensure top-level info also has is_success for callbacks
-        info["is_success"] = info["energy"]["is_success"]
+        # Ensure top-level info also has metrics for callbacks
+        info["is_success"] = is_success
+        info["is_reached"] = is_reached
+        info["is_grasped"] = is_grasped
 
         # --- Augment observation if requested ---
         if self.include_in_obs:
@@ -207,13 +257,8 @@ class EnergyAwareWrapper(gym.Wrapper):
             info["energy"]["episode_summary"] = {
                 "total_energy": self._episode_energy,
                 "peak_torque": self._episode_peak_torque,
-                "mean_power": (
-                    self._episode_energy / (self._step_count * self._dt)
-                    if self._step_count > 0
-                    else 0.0
-                ),
-                "torque_std_per_joint": ep_torques.std(axis=0).tolist(),
-                "torque_mean_per_joint": ep_torques.mean(axis=0).tolist(),
+                "mean_jerk": self._episode_jerk / self._step_count if self._step_count > 0 else 0.0,
+                "max_contact_force": self._episode_max_contact_force,
                 "episode_length": self._step_count,
             }
 

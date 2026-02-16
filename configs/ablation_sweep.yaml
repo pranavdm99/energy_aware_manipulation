@@ -3,10 +3,12 @@
 
 sweep:
   param: "energy.weight"
-  values: [0.0, 0.01, 0.05, 0.1, 0.5]
-  seeds: [42, 123, 456]
+  # values: [0.0, 0.01, 0.05, 0.1, 0.5]
+  values: [0.0, 0.05, 0.1]
+  # seeds: [42, 123, 456]
+  seeds: [42]
   tasks: ["Lift"] # Start with Lift, extend to others later
-  total_timesteps: 1000000
+  total_timesteps: 2000000
 
 # Extends default.yaml for all other settings
 base_config: "configs/default.yaml"

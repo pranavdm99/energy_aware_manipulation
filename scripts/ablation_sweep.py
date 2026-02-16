@@ -55,6 +55,9 @@ def main():
             "--learning-starts", "10000",
             "--wandb-mode", "online",
             "--checkpoint-dir", f"checkpoints/sweep",
+            "--batch-size", "512",
+            "--gradient-steps", "1",
+            "--train-freq", "1",
         ]
 
         run_name = f"{task}_alpha{alpha}_seed{seed}_{int(time.time())}"
