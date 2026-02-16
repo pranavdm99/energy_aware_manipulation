@@ -50,7 +50,10 @@ def main():
             "--energy-weight", str(alpha),
             "--total-timesteps", str(total_timesteps),
             "--seed", str(seed),
-            "--wandb-mode", "offline",
+            "--n-envs", "8",
+            "--horizon", "400",
+            "--learning-starts", "10000",
+            "--wandb-mode", "online",
             "--checkpoint-dir", f"checkpoints/sweep",
         ]
 

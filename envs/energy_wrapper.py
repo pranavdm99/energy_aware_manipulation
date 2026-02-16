@@ -186,7 +186,11 @@ class EnergyAwareWrapper(gym.Wrapper):
             "torques": torques.tolist(),
             "power_per_joint": power_per_joint.tolist(),
             "energy_weight": self.energy_weight,
+            "is_success": bool(self._robosuite_env._check_success()),
         }
+
+        # Ensure top-level info also has is_success for callbacks
+        info["is_success"] = info["energy"]["is_success"]
 
         # --- Augment observation if requested ---
         if self.include_in_obs:
