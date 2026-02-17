@@ -47,17 +47,16 @@ def parse_args():
                         help="Energy penalty weight (alpha)")
     parser.add_argument("--include-energy-obs", action="store_true",
                         help="Include torque features in observations")
+    parser.add_argument("--include-energy-in-obs", action="store_true", help="Include energy metrics in observation")
+    
+    # Language arguments
+    parser.add_argument("--language-conditioned", action="store_true", help="Enable language conditioning")
+    parser.add_argument("--descriptor", type=str, default="normally", help="Task descriptor (e.g., 'gently', 'quickly')")
+    parser.add_argument("--randomize-descriptor", action="store_true", help="Randomly sample descriptors at each reset")
+    parser.add_argument("--language-model", type=str, default="all-MiniLM-L6-v2", help="Sentence-BERT model name")
 
-    # Language
-    parser.add_argument("--language-conditioned", action="store_true",
-                        help="Enable language conditioning")
-    parser.add_argument("--descriptor", type=str, default="normally",
-                        help="Task descriptor for language conditioning")
-    parser.add_argument("--randomize-descriptor", action="store_true",
-                        help="Randomly sample descriptors at each reset")
-
-    # Training
-    parser.add_argument("--total-timesteps", type=int, default=500_000,
+    # Training arguments
+    parser.add_argument("--total-timesteps", type=int, default=500000,
                         help="Total training timesteps")
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--batch-size", type=int, default=512,
@@ -145,15 +144,18 @@ def main():
                 "train_freq": args.train_freq,
                 "learning_starts": args.learning_starts,
                 "seed": args.seed,
+                "learning_starts": args.learning_starts,
+                "seed": args.seed,
             },
             "energy": {
                 "weight": args.energy_weight,
                 "normalize_by_dof": True,
-                "include_in_obs": args.include_energy_obs,
+                "include_in_obs": args.include_energy_in_obs,
             },
             "language": {
                 "enabled": args.language_conditioned,
                 "descriptor": args.descriptor,
+                "model": args.language_model,
                 "randomize_descriptor": args.randomize_descriptor,
             },
             "logging": {

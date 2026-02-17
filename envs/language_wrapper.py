@@ -1,131 +1,117 @@
-"""
-LanguageConditionedWrapper — Conditions the policy on natural-language
-task descriptors by appending Sentence-BERT embeddings to observations.
-
-Also dynamically adjusts the energy weight of an upstream
-EnergyAwareWrapper based on the semantic meaning of the descriptor
-(e.g., "gently" -> higher energy penalty, "quickly" -> lower penalty).
-"""
 
 import gymnasium as gym
 import numpy as np
-from typing import Dict, Optional
-from utils.language_encoder import LanguageEncoder
-
-
-# Default mapping from descriptors to energy weight modifiers
-DEFAULT_DESCRIPTOR_MAP: Dict[str, float] = {
-    "gently": 0.1,
-    "carefully": 0.1,
-    "softly": 0.1,
-    "normally": 0.05,
-    "steadily": 0.05,
-    "quickly": 0.01,
-    "efficiently": 0.01,
-    "fast": 0.01,
-}
-
+from sentence_transformers import SentenceTransformer
 
 class LanguageConditionedWrapper(gym.Wrapper):
-    """Augments observations with language embeddings and modulates energy weight.
-
-    Args:
-        env: Upstream environment (should be an EnergyAwareWrapper).
-        descriptor: Initial task descriptor string.
-        descriptor_map: Dict mapping descriptor keywords to energy weights.
-        model_name: Sentence-BERT model to use for encoding.
-        randomize_descriptor: If True, randomly sample descriptors at reset.
     """
+    A wrapper that conditions the policy on language descriptors.
+    
+    1. Encodes the task descriptor (e.g., "gently", "quickly") using Sentence-BERT.
+    2. Appends the 384-dimensional embedding to the observation space.
+    3. Maps descriptors to energy weights in the info dict (if energy wrapper is present).
+    """
+    
+    # Mapping from descriptors to energy weights (alpha)
+    DESCRIPTOR_MAP = {
+        "gently": 0.1,    # High penalty -> smooth, slow
+        "carefully": 0.1,
+        "normally": 0.05, # Balanced
+        "quickly": 0.0,   # No penalty -> fast, jerky
+        "efficiently": 0.01,
+    }
 
-    def __init__(
-        self,
-        env: gym.Env,
-        descriptor: str = "normally",
-        descriptor_map: Optional[Dict[str, float]] = None,
-        model_name: str = "all-MiniLM-L6-v2",
-        randomize_descriptor: bool = False,
-    ):
+    def __init__(self, env, descriptor="normally", model_name="all-MiniLM-L6-v2", randomize_descriptor=False):
         super().__init__(env)
-        self.encoder = LanguageEncoder(model_name=model_name)
-        self.descriptor_map = descriptor_map or DEFAULT_DESCRIPTOR_MAP
+        self.descriptor = descriptor
         self.randomize_descriptor = randomize_descriptor
-
-        # Encode initial descriptor
-        self._descriptor = descriptor
-        self._embedding = self.encoder.encode(descriptor)
-        self._embedding_dim = len(self._embedding)
-
-        # Expand observation space to include language embedding
-        low = self.observation_space.low
-        high = self.observation_space.high
-        new_low = np.concatenate([
-            low, -np.ones(self._embedding_dim, dtype=np.float32)
-        ])
-        new_high = np.concatenate([
-            high, np.ones(self._embedding_dim, dtype=np.float32)
-        ])
+        self.model = SentenceTransformer(model_name)
+        
+        # Cache embeddings to avoid re-encoding every step
+        self._embedding_cache = {}
+        self._current_embedding = self._get_embedding(descriptor)
+        
+        # Extend observation space
+        # Assuming the base env has a Box observation space
+        assert isinstance(env.observation_space, gym.spaces.Box), "Env must have Box observation space"
+        
+        low = env.observation_space.low
+        high = env.observation_space.high
+        
+        # Embeddings are typically normalized or within [-1, 1], but let's be safe with [-inf, inf] 
+        # or just huge bounds for the embedding part.
+        embed_dim = self._current_embedding.shape[0]
+        
         self.observation_space = gym.spaces.Box(
-            low=new_low, high=new_high, dtype=np.float32
+            low=np.concatenate([low, np.full(embed_dim, -np.inf)]),
+            high=np.concatenate([high, np.full(embed_dim, np.inf)]),
+            dtype=np.float32
         )
+        
+    def _get_embedding(self, text):
+        if text not in self._embedding_cache:
+            self._embedding_cache[text] = self.model.encode(text)
+        return self._embedding_cache[text]
 
-        # Apply energy weight from descriptor
-        self._apply_descriptor_energy_weight(descriptor)
-
-    def _apply_descriptor_energy_weight(self, descriptor: str):
-        """Set the energy weight of the upstream EnergyAwareWrapper based on descriptor."""
-        # Find matching keyword in descriptor
-        energy_weight = self.descriptor_map.get("normally", 0.05)  # default
-        descriptor_lower = descriptor.lower()
-        for keyword, weight in self.descriptor_map.items():
-            if keyword in descriptor_lower:
-                energy_weight = weight
-                break
-
-        # Walk wrapper chain to find EnergyAwareWrapper and set its weight
-        current = self.env
-        while current is not None:
-            if hasattr(current, "energy_weight"):
-                current.energy_weight = energy_weight
-                break
-            current = getattr(current, "env", None)
-
-    def set_descriptor(self, descriptor: str):
-        """Change the task descriptor (and re-encode + adjust energy weight)."""
-        self._descriptor = descriptor
-        self._embedding = self.encoder.encode(descriptor)
-        self._apply_descriptor_energy_weight(descriptor)
+    def set_descriptor(self, descriptor):
+        """Update the current task descriptor."""
+        if descriptor not in self.DESCRIPTOR_MAP:
+             # Default to normally if unknown, or maybe warn?
+             pass 
+        self.descriptor = descriptor
+        self._current_embedding = self._get_embedding(descriptor)
 
     def reset(self, **kwargs):
-        """Reset with optional descriptor randomization."""
         if self.randomize_descriptor:
-            descriptors = list(self.descriptor_map.keys())
-            chosen = np.random.choice(descriptors)
-            self.set_descriptor(chosen)
+            # Sample a random descriptor from the map keys
+            import random
+            descriptors = list(self.DESCRIPTOR_MAP.keys())
+            self.descriptor = random.choice(descriptors)
+            self._current_embedding = self._get_embedding(self.descriptor)
 
         obs, info = self.env.reset(**kwargs)
-
-        # Append language embedding to observation
-        obs = np.concatenate([obs, self._embedding]).astype(np.float32)
-
-        # Add language info
+        
+        # Retrieve the alpha corresponding to the current descriptor
+        alpha = self.DESCRIPTOR_MAP.get(self.descriptor, 0.05)
+        
+        # Pass this alpha to the EnergyAwareWrapper via info or a direct method if possible.
+        # Since we can't easily modify the internal state of a wrapped env directly without unwrapping,
+        # we'll put it in info and hope the training loop or a custom callback can use it, 
+        # OR we modify EnergyAwareWrapper to look for it.
+        # Better approach: EnergyAwareWrapper should be *inside* this wrapper? 
+        # Or this wrapper modifies the reward? 
+        # Actually, EnergyAwareWrapper computes reward based on self.energy_weight.
+        # We can try to set it recursively.
+        self._set_energy_weight_recursive(self.env, alpha)
+        
+        # Make sure info has the descriptor
         info["language"] = {
-            "descriptor": self._descriptor,
-            "embedding_dim": self._embedding_dim,
+            "descriptor": self.descriptor,
+            "energy_weight": alpha
         }
-
-        return obs, info
+        
+        return self._append_embedding(obs), info
 
     def step(self, action):
-        """Step with language-augmented observations."""
         obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # Ensure info has language context
+        if "language" not in info:
+             alpha = self.DESCRIPTOR_MAP.get(self.descriptor, 0.05)
+             info["language"] = {
+                "descriptor": self.descriptor,
+                "energy_weight": alpha
+            }
+            
+        return self._append_embedding(obs), reward, terminated, truncated, info
 
-        # Append language embedding
-        obs = np.concatenate([obs, self._embedding]).astype(np.float32)
+    def _append_embedding(self, obs):
+        return np.concatenate([obs, self._current_embedding]).astype(np.float32)
 
-        # Add language info
-        info["language"] = {
-            "descriptor": self._descriptor,
-            "embedding_dim": self._embedding_dim,
-        }
-
-        return obs, reward, terminated, truncated, info
+    def _set_energy_weight_recursive(self, env, weight):
+        """Recursively search for EnergyAwareWrapper and update its weight."""
+        if hasattr(env, "energy_weight"):
+            setattr(env, "energy_weight", weight)
+        
+        if hasattr(env, "env"):
+            self._set_energy_weight_recursive(env.env, weight)

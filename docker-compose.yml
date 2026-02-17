@@ -19,6 +19,7 @@ services:
       - .:/workspace
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - ${HOME}/.Xauthority:/root/.Xauthority:ro
+      - /dev/dri:/dev/dri
 
     # Keep container running for interactive use
     stdin_open: true

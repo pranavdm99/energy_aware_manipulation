@@ -197,23 +197,95 @@ class EnergyAwareWrapper(gym.Wrapper):
         # --- Track Stage Progress (for Lift task) ---
         is_success = bool(self._robosuite_env._check_success())
         
-        # Get cube and gripper positions
+        # Get gripper position
         try:
-            # Try to find the object body - Lift uses 'cube_main'
-            obj_name = "cube_main" if "cube_main" in sim.model.body_names else "cube"
-            if obj_name not in sim.model.body_names:
-                for name in sim.model.body_names:
-                    if "cube" in name or "object" in name:
-                        obj_name = name
-                        break
+            # Try to find the gripper site
+            # Common names: gripper0_grip_site, gripper0_right_grip_site, grip_site
+            grip_site_name = "gripper0_right_grip_site"
+            if grip_site_name not in sim.model.site_names:
+                if "gripper0_grip_site" in sim.model.site_names: # For older robosuite
+                    grip_site_name = "gripper0_grip_site"
+                else:
+                    for name in sim.model.site_names:
+                        if "grip_site" in name:
+                            grip_site_name = name
+                            break
             
-            cube_pos = sim.data.body_xpos[sim.model.body_name2id(obj_name)]
-            gripper_pos = sim.data.site_xpos[sim.model.site_name2id("gripper0_grip_site")]
-            dist = np.linalg.norm(cube_pos - gripper_pos)
+            gripper_pos = sim.data.site_xpos[sim.model.site_name2id(grip_site_name)]
+
+            # Identify target object position based on task type
+            # We check the unwrapped env for specific attributes
+            base_env = self.unwrapped
+            target_pos = None
+
+            # 1. Lift (cube)
+            if hasattr(base_env, "cube"):
+                 # Lift task
+                 # cube.root_body gives the body name usually? No, it gives ID or name depending on version.
+                 # verification script showed obj_body_id={'cube': 26}.
+                 # We can use sim.data.body_xpos with body name "cube_main"
+                 obj_name = "cube_main" if "cube_main" in sim.model.body_names else "cube"
+                 target_pos = sim.data.body_xpos[sim.model.body_name2id(obj_name)]
             
-            is_reached = dist < 0.05
-            is_grasped = is_reached and (cube_pos[2] > 0.82)
-        except (ValueError, KeyError):
+            # 2. Door
+            elif hasattr(base_env, "door"):
+                 # Door task
+                 # Use handle position for reach
+                 # base_env.door_handle_site_id is reliable
+                 if hasattr(base_env, "door_handle_site_id"):
+                     target_pos = sim.data.site_xpos[base_env.door_handle_site_id]
+                 else:
+                     # Fallback to door_handle site name
+                     if "door_handle" in sim.model.site_names:
+                         target_pos = sim.data.site_xpos[sim.model.site_name2id("door_handle")]
+
+            # 3. NutAssembly
+            elif hasattr(base_env, "nuts"):
+                 # NutAssembly - find the first nut
+                 # obj_body_id={'SquareNut': 27, ...}
+                 # We'll just pick the first one found in body names
+                 for nut_name in ["SquareNut_main", "RoundNut_main"]:
+                     if nut_name in sim.model.body_names:
+                         target_pos = sim.data.body_xpos[sim.model.body_name2id(nut_name)]
+                         break
+
+            # 4. PickPlace (objects)
+            elif hasattr(base_env, "objects"):
+                 # Find nearest object
+                 min_dist = float("inf")
+                 best_pos = None
+                 for obj in base_env.objects:
+                     # object names in model are usually obj.name + "_main"
+                     name = obj.name + "_main"
+                     if name in sim.model.body_names:
+                         pos = sim.data.body_xpos[sim.model.body_name2id(name)]
+                         dist = np.linalg.norm(pos - gripper_pos)
+                         if dist < min_dist:
+                             min_dist = dist
+                             best_pos = pos
+                 target_pos = best_pos
+
+            # Fallback
+            if target_pos is None:
+                 # Original logic
+                 obj_name = "cube_main" if "cube_main" in sim.model.body_names else "cube"
+                 if obj_name in sim.model.body_names:
+                     target_pos = sim.data.body_xpos[sim.model.body_name2id(obj_name)]
+            
+            if target_pos is not None:
+                dist = np.linalg.norm(target_pos - gripper_pos)
+                is_reached = dist < 0.05
+                is_grasped = is_reached and (target_pos[2] > 0.82) # Height threshold for Lift/Pick
+                # For Door/Nut, grasp logic might differ, but this is a good baseline
+                if hasattr(base_env, "door"):
+                    # For door, grasp is touching handle + maybe handle pulled?
+                    # Simplify: reach < 0.05
+                    is_grasped = False # Door doesn't involve "lifting" usually
+            else:
+                is_reached = False
+                is_grasped = False
+                
+        except (ValueError, KeyError, AttributeError):
             is_reached = False
             is_grasped = False
 

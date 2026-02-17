@@ -76,11 +76,11 @@ def make_env(
     )
 
     # --- Wrap with GymWrapper for gymnasium API ---
-    gym_env = GymWrapper(robosuite_env)
+    env = GymWrapper(robosuite_env)
 
     # --- Wrap with EnergyAwareWrapper ---
-    energy_env = EnergyAwareWrapper(
-        env=gym_env,
+    env = EnergyAwareWrapper(
+        env=env,
         energy_weight=energy_weight,
         normalize_by_dof=normalize_by_dof,
         include_in_obs=include_energy_in_obs,
@@ -88,17 +88,14 @@ def make_env(
 
     # --- Optionally wrap with LanguageConditionedWrapper ---
     if language_conditioned:
-        final_env = LanguageConditionedWrapper(
-            env=energy_env,
+        env = LanguageConditionedWrapper(
+            env=env,
             descriptor=descriptor,
-            descriptor_map=descriptor_map,
             model_name=language_model,
             randomize_descriptor=randomize_descriptor,
         )
-    else:
-        final_env = energy_env
 
-    return final_env
+    return env
 
 
 def make_env_from_config(config: dict) -> gym.Env:

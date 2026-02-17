@@ -166,7 +166,19 @@ def print_summary(results):
 def main():
     args = parse_args()
 
-    # Create environment — enable offscreen renderer if recording video
+    # Load model header to check and auto-detect language conditioning
+    print(f"Loading model from {args.checkpoint}")
+    from stable_baselines3.common.save_util import load_from_zip_file
+    data, _, _ = load_from_zip_file(args.checkpoint)
+    
+    # Auto-detect language conditioning if not explicitly set
+    if not args.language_conditioned:
+        obs_shape = data.get("observation_space").shape
+        if obs_shape == (444,): # 60 (base) + 384 (SBERT)
+            print("  Language conditioning detected in checkpoint. Enabling automatically.")
+            args.language_conditioned = True
+
+    # Create environment
     env = make_env(
         task=args.task,
         energy_weight=args.energy_weight,
@@ -177,8 +189,6 @@ def main():
         camera_size=tuple(args.video_size),
     )
 
-    # Load model
-    print(f"Loading model from {args.checkpoint}")
     model = SAC.load(args.checkpoint, env=env)
 
     # Evaluate
