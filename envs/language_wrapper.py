@@ -21,6 +21,15 @@ class LanguageConditionedWrapper(gym.Wrapper):
         "efficiently": 0.01,
     }
 
+    # Mapping from descriptors to energy budgets (epsilon) for ECO
+    ENERGY_BUDGET_MAP = {
+        "gently": 150.0,
+        "carefully": 150.0,
+        "normally": 300.0,
+        "quickly": 1000.0,
+        "efficiently": 1000.0,
+    }
+
     def __init__(self, env, descriptor="normally", model_name="all-MiniLM-L6-v2", randomize_descriptor=False):
         super().__init__(env)
         self.descriptor = descriptor
@@ -71,23 +80,27 @@ class LanguageConditionedWrapper(gym.Wrapper):
 
         obs, info = self.env.reset(**kwargs)
         
-        # Retrieve the alpha corresponding to the current descriptor
-        alpha = self.DESCRIPTOR_MAP.get(self.descriptor, 0.05)
+        # ECO Integration: Check if we have an adaptive weight from the registry
+        try:
+            from utils.constrained_rl import LagrangianRegistry
+            alpha = LagrangianRegistry.get_weight(self.descriptor, default=None)
+        except ImportError:
+            alpha = None
+            
+        if alpha is None:
+            # Fallback to fixed descriptor map
+            alpha = self.DESCRIPTOR_MAP.get(self.descriptor, 0.05)
+            
+        budget = self.ENERGY_BUDGET_MAP.get(self.descriptor, 150.0)
         
-        # Pass this alpha to the EnergyAwareWrapper via info or a direct method if possible.
-        # Since we can't easily modify the internal state of a wrapped env directly without unwrapping,
-        # we'll put it in info and hope the training loop or a custom callback can use it, 
-        # OR we modify EnergyAwareWrapper to look for it.
-        # Better approach: EnergyAwareWrapper should be *inside* this wrapper? 
-        # Or this wrapper modifies the reward? 
-        # Actually, EnergyAwareWrapper computes reward based on self.energy_weight.
-        # We can try to set it recursively.
+        # Pass this alpha to the EnergyAwareWrapper
         self._set_energy_weight_recursive(self.env, alpha)
         
         # Make sure info has the descriptor
         info["language"] = {
             "descriptor": self.descriptor,
-            "energy_weight": alpha
+            "energy_weight": alpha,
+            "energy_budget": budget
         }
         
         return self._append_embedding(obs), info
@@ -95,12 +108,22 @@ class LanguageConditionedWrapper(gym.Wrapper):
     def step(self, action):
         obs, reward, terminated, truncated, info = self.env.step(action)
         
+        # Periodically re-sync weight from registry if in ECO mode
+        # This ensures the step reward computation uses the latest lambda
+        from utils.constrained_rl import LagrangianRegistry
+        alpha = LagrangianRegistry.get_weight(self.descriptor, default=None)
+        if alpha is not None:
+             self._set_energy_weight_recursive(self.env, alpha)
+        else:
+             alpha = self.DESCRIPTOR_MAP.get(self.descriptor, 0.05)
+
         # Ensure info has language context
         if "language" not in info:
-             alpha = self.DESCRIPTOR_MAP.get(self.descriptor, 0.05)
+             budget = self.ENERGY_BUDGET_MAP.get(self.descriptor, 150.0)
              info["language"] = {
                 "descriptor": self.descriptor,
-                "energy_weight": alpha
+                "energy_weight": alpha,
+                "energy_budget": budget
             }
             
         return self._append_embedding(obs), reward, terminated, truncated, info

@@ -114,6 +114,7 @@ def train_agent(
     eval_freq: int = 10_000,
     n_eval_episodes: int = 20,
     save_freq: int = 50_000,
+    extra_callbacks: Optional[list] = None,
     verbose: int = 1,
 ) -> SAC:
     """Train the SAC agent with energy logging and checkpointing.
@@ -175,6 +176,10 @@ def train_agent(
             verbose=verbose,
         )
         callbacks.append(eval_cb)
+
+    # Add any extra callbacks (e.g., ECO LagrangianCallback)
+    if extra_callbacks is not None:
+        callbacks.extend(extra_callbacks)
 
     callback = CallbackList(callbacks)
 

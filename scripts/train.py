@@ -13,6 +13,7 @@ import os
 import sys
 import yaml
 import time
+import wandb
 
 # Headless rendering for parallel envs
 os.environ.setdefault("MUJOCO_GL", "osmesa")
@@ -79,6 +80,7 @@ def parse_args():
     parser.add_argument("--log-interval", type=int, default=1000)
     parser.add_argument("--eval-freq", type=int, default=10_000)
     parser.add_argument("--save-freq", type=int, default=50_000)
+    parser.add_argument("--eco", action="store_true", help="Enable Energy-Constrained Optimization (Lagrangian)")
 
     # Output
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")
@@ -167,6 +169,11 @@ def main():
             },
         }
 
+    # ECO override: if ECO is enabled, initial weight for EnergyAwareWrapper 
+    # should be small as it will be adjusted by LagrangianCallback
+    if args.eco:
+        config["energy"]["weight"] = 0.01
+
     # --- Generate run name ---
     energy_w = config["energy"]["weight"]
     task = config["environment"]["task"]
@@ -211,6 +218,13 @@ def main():
         run_name,
     )
 
+    # --- Callbacks ---
+    extra_callbacks = []
+    if args.eco:
+        from utils.constrained_rl import LagrangianCallback
+        print("Enabling Energy-Constrained Optimization (ECO)...")
+        extra_callbacks.append(LagrangianCallback(learning_rate=0.05, initial_lambda=0.01))
+
     model = train_agent(
         model=model,
         total_timesteps=config["training"]["total_timesteps"],
@@ -219,6 +233,7 @@ def main():
         log_freq=config.get("logging", {}).get("log_interval", 1000),
         eval_freq=config.get("logging", {}).get("eval_freq", 10_000),
         save_freq=config.get("logging", {}).get("save_freq", 50_000),
+        extra_callbacks=extra_callbacks,
     )
 
     print(f"\nTraining complete! Model saved to {checkpoint_dir}")
@@ -235,6 +250,14 @@ def main():
     print(f"  Mean energy:    {results['mean_total_energy']:.2f}")
     print(f"  Mean peak τ:    {results['mean_peak_torque']:.2f}")
     print(f"  Mean ep length: {results['mean_episode_length']:.0f}")
+
+    if wandb.run is not None:
+        wandb.log({
+            "eval_final/success_rate": results["success_rate"],
+            "eval_final/mean_total_energy": results["mean_total_energy"],
+            "eval_final/mean_peak_torque": results["mean_peak_torque"],
+            "eval_final/mean_episode_length": results["mean_episode_length"]
+        })
 
     env.close()
     eval_env.close()

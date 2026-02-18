@@ -121,7 +121,7 @@ class EnergyLoggingCallback(BaseCallback):
             sb3_logger = self.model.logger
             if hasattr(sb3_logger, "name_to_value"):
                 for key, value in sb3_logger.name_to_value.items():
-                    if key.startswith(("train/", "time/")):
+                    if key.startswith(("train/", "time/", "eco/")):
                         metrics[key] = value
 
         if wandb.run is not None:
