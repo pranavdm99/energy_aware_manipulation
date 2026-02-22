@@ -84,6 +84,36 @@ class EnergyAwareWrapper(gym.Wrapper):
             "Ensure this wraps a robosuite GymWrapper environment."
         )
 
+    # ---------------------------------------------------------------
+    # Door-specific contact detection helpers
+    # ---------------------------------------------------------------
+    # Geom names discovered via scripts/inspect_door_env.py
+    _DOOR_HANDLE_GEOMS = frozenset({
+        "Door_handle",
+        "Door_handle_base",
+        "Door_latch",
+        "Door_latch_tip",
+    })
+    _GRIPPER_PAD_GEOMS = frozenset({
+        "gripper0_right_finger1_pad_collision",
+        "gripper0_right_finger2_pad_collision",
+    })
+
+    def _check_door_handle_contact(self, sim) -> bool:
+        """Return True if either finger pad is in contact with the door handle.
+
+        Iterates the MuJoCo contact array and looks for any pair where one
+        geom is a gripper pad and the other is a door handle geom.
+        """
+        for i in range(sim.data.ncon):
+            c = sim.data.contact[i]
+            g1 = sim.model.geom_id2name(c.geom1)
+            g2 = sim.model.geom_id2name(c.geom2)
+            if (g1 in self._GRIPPER_PAD_GEOMS and g2 in self._DOOR_HANDLE_GEOMS) or \
+               (g2 in self._GRIPPER_PAD_GEOMS and g1 in self._DOOR_HANDLE_GEOMS):
+                return True
+        return False
+
     def _get_torques_and_velocities(self):
         """Extract joint torques and velocities from MuJoCo sim data."""
         sim = self._robosuite_env.sim
@@ -227,60 +257,57 @@ class EnergyAwareWrapper(gym.Wrapper):
                  obj_name = "cube_main" if "cube_main" in sim.model.body_names else "cube"
                  target_pos = sim.data.body_xpos[sim.model.body_name2id(obj_name)]
             
-            # 2. Door
+            # 2. Door — use handle site for reach, MuJoCo contacts for grasp
             elif hasattr(base_env, "door"):
-                 # Door task
-                 # Use handle position for reach
-                 # base_env.door_handle_site_id is reliable
-                 if hasattr(base_env, "door_handle_site_id"):
-                     target_pos = sim.data.site_xpos[base_env.door_handle_site_id]
-                 else:
-                     # Fallback to door_handle site name
-                     if "door_handle" in sim.model.site_names:
-                         target_pos = sim.data.site_xpos[sim.model.site_name2id("door_handle")]
+                # Get handle position from the reliable site id
+                if hasattr(base_env, "door_handle_site_id"):
+                    target_pos = sim.data.site_xpos[base_env.door_handle_site_id]
+                elif "Door_handle" in sim.model.site_names:
+                    target_pos = sim.data.site_xpos[
+                        sim.model.site_name2id("Door_handle")
+                    ]
 
             # 3. NutAssembly
             elif hasattr(base_env, "nuts"):
-                 # NutAssembly - find the first nut
-                 # obj_body_id={'SquareNut': 27, ...}
-                 # We'll just pick the first one found in body names
-                 for nut_name in ["SquareNut_main", "RoundNut_main"]:
-                     if nut_name in sim.model.body_names:
-                         target_pos = sim.data.body_xpos[sim.model.body_name2id(nut_name)]
-                         break
+                for nut_name in ["SquareNut_main", "RoundNut_main"]:
+                    if nut_name in sim.model.body_names:
+                        target_pos = sim.data.body_xpos[
+                            sim.model.body_name2id(nut_name)
+                        ]
+                        break
 
             # 4. PickPlace (objects)
             elif hasattr(base_env, "objects"):
-                 # Find nearest object
-                 min_dist = float("inf")
-                 best_pos = None
-                 for obj in base_env.objects:
-                     # object names in model are usually obj.name + "_main"
-                     name = obj.name + "_main"
-                     if name in sim.model.body_names:
-                         pos = sim.data.body_xpos[sim.model.body_name2id(name)]
-                         dist = np.linalg.norm(pos - gripper_pos)
-                         if dist < min_dist:
-                             min_dist = dist
-                             best_pos = pos
-                 target_pos = best_pos
+                min_dist = float("inf")
+                best_pos = None
+                for obj in base_env.objects:
+                    name = obj.name + "_main"
+                    if name in sim.model.body_names:
+                        pos = sim.data.body_xpos[sim.model.body_name2id(name)]
+                        dist = np.linalg.norm(pos - gripper_pos)
+                        if dist < min_dist:
+                            min_dist = dist
+                            best_pos = pos
+                target_pos = best_pos
 
             # Fallback
             if target_pos is None:
-                 # Original logic
-                 obj_name = "cube_main" if "cube_main" in sim.model.body_names else "cube"
-                 if obj_name in sim.model.body_names:
-                     target_pos = sim.data.body_xpos[sim.model.body_name2id(obj_name)]
-            
+                obj_name = "cube_main" if "cube_main" in sim.model.body_names else "cube"
+                if obj_name in sim.model.body_names:
+                    target_pos = sim.data.body_xpos[sim.model.body_name2id(obj_name)]
+
             if target_pos is not None:
                 dist = np.linalg.norm(target_pos - gripper_pos)
-                is_reached = dist < 0.05
-                is_grasped = is_reached and (target_pos[2] > 0.82) # Height threshold for Lift/Pick
-                # For Door/Nut, grasp logic might differ, but this is a good baseline
+
                 if hasattr(base_env, "door"):
-                    # For door, grasp is touching handle + maybe handle pulled?
-                    # Simplify: reach < 0.05
-                    is_grasped = False # Door doesn't involve "lifting" usually
+                    # Door: reach = gripper close to handle site
+                    #        grasp = finger pad physically contacting handle geom
+                    is_reached = dist < 0.06
+                    is_grasped = self._check_door_handle_contact(sim)
+                else:
+                    # Lift / PickPlace: reach by distance, grasp by height
+                    is_reached = dist < 0.05
+                    is_grasped = is_reached and (target_pos[2] > 0.82)
             else:
                 is_reached = False
                 is_grasped = False
@@ -289,12 +316,24 @@ class EnergyAwareWrapper(gym.Wrapper):
             is_reached = False
             is_grasped = False
 
+        # --- Door shaped bonus: reward reaching and contacting the handle ---
+        # This prevents body-pushing reward hacking by incentivising gripper use.
+        # Bonuses are small (0.3 / 0.5) relative to the native door-angle reward
+        # (~2.5 max) so they shape without distorting the reward scale.
+        door_bonus = 0.0
+        if hasattr(self._robosuite_env, "door"):
+            if is_reached:
+                door_bonus += 0.3
+            if is_grasped:
+                door_bonus += 0.5
+
         # --- Modify reward ---
-        reward_total = reward_task + self.energy_weight * penalty
+        reward_total = reward_task + door_bonus + self.energy_weight * penalty
 
         # --- Populate info ---
         info["energy"] = {
             "reward_task": reward_task,
+            "reward_door_bonus": door_bonus,
             "reward_energy_penalty": self.energy_weight * penalty,
             "reward_total": reward_total,
             "step_power": instantaneous_power,

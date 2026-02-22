@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 from stable_baselines3.common.callbacks import BaseCallback
+from utils.constants import LAGRANGIAN_CLIP_MAX
 
 class LagrangianRegistry:
     """Shared registry for Lagrangian multipliers."""
@@ -94,7 +95,7 @@ class LagrangianCallback(BaseCallback):
                 # Prevents alpha/lambda from exploding to astronomical values (e.g. 1e153)
                 # when the budget is difficult to satisfy.
                 with torch.no_grad():
-                    max_log_lambda = np.log(50.0)  # Max weight of 50.0
+                    max_log_lambda = np.log(LAGRANGIAN_CLIP_MAX)  # Bounded by constant
                     log_lambda.clamp_(max=max_log_lambda)
                 
                 updated_lambda = torch.exp(log_lambda).item()

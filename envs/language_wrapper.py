@@ -2,6 +2,7 @@
 import gymnasium as gym
 import numpy as np
 from sentence_transformers import SentenceTransformer
+from utils.constants import ENERGY_BUDGET_MAP, ENERGY_BUDGET_BY_TASK, DEFAULT_ENERGY_MAP
 
 class LanguageConditionedWrapper(gym.Wrapper):
     """
@@ -13,31 +14,25 @@ class LanguageConditionedWrapper(gym.Wrapper):
     """
     
     # Mapping from descriptors to energy weights (alpha)
-    DESCRIPTOR_MAP = {
-        "gently": 0.1,    # High penalty -> smooth, slow
-        "carefully": 0.1,
-        "normally": 0.05, # Balanced
-        "quickly": 0.0,   # No penalty -> fast, jerky
-        "efficiently": 0.01,
-    }
+    DESCRIPTOR_MAP = DEFAULT_ENERGY_MAP
 
-    # Mapping from descriptors to energy budgets (epsilon) for ECO
-    ENERGY_BUDGET_MAP = {
-        "gently": 150.0,
-        "carefully": 150.0,
-        "normally": 300.0,
-        "quickly": 1000.0,
-        "efficiently": 1000.0,
-    }
+    # Default (Lift-scale) budget map; overridden per-task in reset()
+    ENERGY_BUDGET_MAP = ENERGY_BUDGET_MAP
 
-    def __init__(self, env, descriptor="normally", model_name="all-MiniLM-L6-v2", randomize_descriptor=False):
+    def __init__(self, env, descriptor="normally", model_name="all-MiniLM-L6-v2", randomize_descriptor=False, pre_calculated_embeddings=None):
         super().__init__(env)
         self.descriptor = descriptor
         self.randomize_descriptor = randomize_descriptor
-        self.model = SentenceTransformer(model_name)
         
         # Cache embeddings to avoid re-encoding every step
-        self._embedding_cache = {}
+        self._embedding_cache = pre_calculated_embeddings or {}
+        
+        if not self._embedding_cache:
+            print(f"[LanguageConditionedWrapper] No pre-calculated embeddings. Loading {model_name}...")
+            self.model = SentenceTransformer(model_name)
+        else:
+            self.model = None
+            
         self._current_embedding = self._get_embedding(descriptor)
         
         # Extend observation space
@@ -59,7 +54,10 @@ class LanguageConditionedWrapper(gym.Wrapper):
         
     def _get_embedding(self, text):
         if text not in self._embedding_cache:
-            self._embedding_cache[text] = self.model.encode(text)
+            if self.model is not None:
+                self._embedding_cache[text] = self.model.encode(text)
+            else:
+                raise ValueError(f"Descriptor '{text}' not in pre-calculated embeddings and no language model loaded!")
         return self._embedding_cache[text]
 
     def set_descriptor(self, descriptor):
@@ -70,28 +68,39 @@ class LanguageConditionedWrapper(gym.Wrapper):
         self.descriptor = descriptor
         self._current_embedding = self._get_embedding(descriptor)
 
+    def _get_task_budget_map(self):
+        """Return the ECO budget map appropriate for the current task."""
+        # Walk wrapper chain to find the robosuite task name
+        env = self.env
+        while hasattr(env, "env"):
+            env = env.env
+        task_name = getattr(env, "name", None) or getattr(env, "env_name", None)
+        if task_name and task_name in ENERGY_BUDGET_BY_TASK:
+            return ENERGY_BUDGET_BY_TASK[task_name]
+        return self.ENERGY_BUDGET_MAP  # default (Lift-scale)
+
     def reset(self, **kwargs):
         if self.randomize_descriptor:
-            # Sample a random descriptor from the map keys
             import random
             descriptors = list(self.DESCRIPTOR_MAP.keys())
             self.descriptor = random.choice(descriptors)
             self._current_embedding = self._get_embedding(self.descriptor)
 
         obs, info = self.env.reset(**kwargs)
-        
+
         # ECO Integration: Check if we have an adaptive weight from the registry
         try:
             from utils.constrained_rl import LagrangianRegistry
             alpha = LagrangianRegistry.get_weight(self.descriptor, default=None)
         except ImportError:
             alpha = None
-            
+
         if alpha is None:
-            # Fallback to fixed descriptor map
             alpha = self.DESCRIPTOR_MAP.get(self.descriptor, 0.05)
-            
-        budget = self.ENERGY_BUDGET_MAP.get(self.descriptor, 150.0)
+
+        # Use task-appropriate budget map
+        task_budget_map = self._get_task_budget_map()
+        budget = task_budget_map.get(self.descriptor, 150.0)
         
         # Pass this alpha to the EnergyAwareWrapper
         self._set_energy_weight_recursive(self.env, alpha)

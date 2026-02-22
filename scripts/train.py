@@ -21,9 +21,7 @@ os.environ.setdefault("MUJOCO_GL", "osmesa")
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv
-
-from envs.env_factory import make_env, make_env_from_config
+from envs.env_factory import make_env, make_env_from_config, create_vec_env
 from agents.sac_agent import create_sac_agent, create_sac_from_config, train_agent
 from utils.logging_utils import init_wandb
 
@@ -39,7 +37,7 @@ def parse_args():
 
     # Environment
     parser.add_argument("--task", type=str, default="Lift",
-                        help="Robosuite task (Lift, PickPlace, Door, NutAssemblySingle)")
+                        help="Robosuite task(s) (comma-separated for multi-task, e.g. 'Lift,PickPlace,Door')")
     parser.add_argument("--horizon", type=int, default=500,
                         help="Max steps per episode")
 
@@ -62,6 +60,8 @@ def parse_args():
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--batch-size", type=int, default=512,
                         help="Mini-batch size for gradient updates")
+    parser.add_argument("--buffer-size", type=int, default=1000000,
+                        help="Replay buffer capacity")
     parser.add_argument("--n-envs", type=int, default=1,
                         help="Number of parallel environments (1=DummyVecEnv, >1=SubprocVecEnv)")
     parser.add_argument("--gradient-steps", type=int, default=1,
@@ -88,34 +88,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def _make_env_fn(config, rank, seed):
-    """Create a callable that returns an environment (for SubprocVecEnv)."""
-    def _init():
-        env = make_env_from_config(config)
-        env.reset(seed=seed + rank)
-        return env
-    return _init
-
-
-def create_vec_env(config, n_envs, seed):
-    """Create a vectorized environment (parallel or sequential).
-
-    Args:
-        config: Environment config dict.
-        n_envs: Number of parallel environments.
-        seed: Base random seed.
-
-    Returns:
-        VecEnv instance (SubprocVecEnv if n_envs > 1, else DummyVecEnv).
-    """
-    env_fns = [_make_env_fn(config, i, seed) for i in range(n_envs)]
-
-    if n_envs > 1:
-        print(f"Creating {n_envs} parallel environments (SubprocVecEnv)...")
-        return SubprocVecEnv(env_fns, start_method="forkserver")
-    else:
-        print("Creating single environment (DummyVecEnv)...")
-        return DummyVecEnv(env_fns)
 
 
 def main():
@@ -132,6 +104,7 @@ def main():
         config = {
             "environment": {
                 "task": args.task,
+                "task_list": args.task.split(",") if "," in args.task else None,
                 "robots": "Panda",
                 "controller": "OSC_POSE",
                 "horizon": args.horizon,
@@ -141,6 +114,7 @@ def main():
                 "total_timesteps": args.total_timesteps,
                 "learning_rate": args.learning_rate,
                 "batch_size": args.batch_size,
+                "buffer_size": args.buffer_size,
                 "n_envs": args.n_envs,
                 "gradient_steps": args.gradient_steps,
                 "train_freq": args.train_freq,
@@ -168,6 +142,11 @@ def main():
                 "save_freq": args.save_freq,
             },
         }
+
+    # Automatically enable padding if multi-task is detected
+    if config["environment"].get("task_list"):
+        config["environment"]["padded_obs_dim"] = 110
+        print(f"Multi-task detected. Padding observations to 110.")
 
     # ECO override: if ECO is enabled, initial weight for EnergyAwareWrapper 
     # should be small as it will be adjusted by LagrangianCallback
@@ -205,10 +184,12 @@ def main():
 
     env = create_vec_env(config, n_envs, seed)
 
-    # Separate eval env (single env, no energy penalty for fair success eval)
+    # Separate eval env (no energy penalty for fair success eval)
     eval_config = config.copy()
     eval_config["energy"] = {**config["energy"], "weight": 0.0}
-    eval_env = create_vec_env(eval_config, n_envs=1, seed=seed + 100)
+    
+    n_eval_envs = len(config["environment"]["task_list"]) if config["environment"].get("task_list") else 1
+    eval_env = create_vec_env(eval_config, n_envs=n_eval_envs, seed=seed + 100)
 
     # --- Create and train agent ---
     model = create_sac_from_config(env, config)
@@ -241,9 +222,12 @@ def main():
     # --- Quick evaluation ---
     from agents.sac_agent import evaluate_agent
 
-    # Use single env for final eval
+    # Use first task from list for final quick eval
+    if config["environment"].get("task_list"):
+        eval_config["environment"]["task"] = config["environment"]["task_list"][0]
+        
     single_eval_env = make_env_from_config(eval_config)
-    print("\nRunning final evaluation (20 episodes)...")
+    print(f"\nRunning final evaluation on {eval_config['environment']['task']} (20 episodes)...")
     results = evaluate_agent(model, single_eval_env, n_episodes=20)
     print(f"\nFinal Results:")
     print(f"  Success rate:   {results['success_rate']:.2%}")

@@ -25,6 +25,7 @@ from stable_baselines3 import SAC
 from envs.env_factory import make_env
 from agents.sac_agent import evaluate_agent
 from utils.metrics import compute_jerk
+from utils.constants import MULTITASK_PADDED_DIM, LANGUAGE_EMBEDDING_DIM
 
 
 def parse_args():
@@ -171,11 +172,22 @@ def main():
     from stable_baselines3.common.save_util import load_from_zip_file
     data, _, _ = load_from_zip_file(args.checkpoint)
     
-    # Auto-detect language conditioning if not explicitly set
+    # Auto-detect language conditioning or padding if not explicitly set
+    obs_shape = data.get("observation_space").shape
+    is_multi_task_padded = False
+    
+    if obs_shape == (MULTITASK_PADDED_DIM,):
+        print(f"  Multi-task padding detected ({obs_shape}).")
+        is_multi_task_padded = True
+    
     if not args.language_conditioned:
-        obs_shape = data.get("observation_space").shape
-        if obs_shape == (444,): # 60 (base) + 384 (SBERT)
-            print("  Language conditioning detected in checkpoint. Enabling automatically.")
+        expected_padded = (MULTITASK_PADDED_DIM + LANGUAGE_EMBEDDING_DIM,)
+        if obs_shape == expected_padded:
+            print(f"  Multi-task/Padded language model detected ({obs_shape}). Enabling automatically.")
+            args.language_conditioned = True
+            is_multi_task_padded = True
+        elif len(obs_shape) == 1 and obs_shape[0] > LANGUAGE_EMBEDDING_DIM:
+            print(f"  Language conditioning suspected in checkpoint ({obs_shape}). Enabling.")
             args.language_conditioned = True
 
     # Create environment
@@ -187,6 +199,7 @@ def main():
         render=args.render,
         camera_name=args.camera if args.save_video else None,
         camera_size=tuple(args.video_size),
+        padded_obs_dim=MULTITASK_PADDED_DIM if is_multi_task_padded else None,
     )
 
     model = SAC.load(args.checkpoint, env=env)
