@@ -1,10 +1,10 @@
 ## The Problem
 
-Train a robot to open a door. It learns to succeed: by slamming into it with full force. Technically works. Practically useless.
+Train a robot to open a door. It learns to succeed by slamming into it with full force. Technically works. Practically useless.
 
-Standard robot learning optimizes for **what** to do, not **how** to do it. The result: jerky movements, wasted energy, and no way to say "be gentle with this" without retraining from scratch.
+Standard robot learning optimizes for **what** to do, not necessarily **how** to do it. This often results in jerky movements, wasted energy, and no way to say "be gentle with this" without retraining from scratch.
 
-This project explores adding energy efficiency and language-based control to robot manipulation. Can we teach a robot to complete tasks successfully *and* let a user control how much energy it uses just by speaking to it?
+This project explores adding energy efficiency and language-based control to robot manipulation. Can we teach a robot to complete tasks successfully and let a user control how much energy it uses just by speaking to it?
 
 ---
 
@@ -16,7 +16,7 @@ A robot arm (Franka Panda in [Robosuite](https://robosuite.ai/)) that:
 2. **Adapts energy use** based on simple commands like "carefully" or "quickly"
 3. **Switches behavior instantly** with no retraining or config files
 
-Say "move carefully" and it uses minimal energy. Say "move quickly" and it prioritizes speed. Same policy, different behaviors.
+You can say "move carefully" and it uses minimal energy or "move quickly" and it prioritizes speed. Same policy, different behaviors.
 
 ---
 
@@ -63,13 +63,16 @@ First obstacle: I told the robot "open the door". It learned to **ram into the d
 
 ## Challenge #2: Language Control
 
-Next: connecting language to energy budgets. Map simple phrases to constraints:
+Next, connecting language to energy budgets. We can map simple phrases to constraints:
 
 ![Language controls energy budget](images/language_energy_mapping.png)
 
-**Implementation:** Encode text with Sentence-BERT → feed embedding to policy → policy respects corresponding energy budget during execution.
+**Implementation:** 
+1. Encode text with Sentence-BERT
+2. Feed embedding to policy
+3. Policy respects corresponding energy budget during execution
 
-Instead of tuning α or budget hyperparameters and retraining, the Lagrangian multiplier ($\lambda$) dynamically adjusted the penalty weight during training to force the policy under the language-conditioned budget. The policy simply learned to map the *language embedding* to the *physical behavior* that satisfies that budget.
+Instead of tuning α or budget hyperparameters and retraining, the Lagrangian multiplier (λ) dynamically adjusted the penalty weight during training to force the policy under the language-conditioned budget. The policy simply learned to map the *language embedding* to the *physical behavior* that satisfies that budget.
 
 ---
 
@@ -88,25 +91,26 @@ The data shows the classic **success-energy tradeoff**:
 - **"Carefully"**: 0% success, 65J (too little force to open door)
 - **"Quickly"**: 96% success, 440J (2.3× energy for marginal gain)
 
-Language lets you traverse this tradeoff in real-time. No retraining, just speak.
+Language allows us to quantify this tradeoff in real-time without any retraining.
 
-> [!WARNING]
-> **Note on energy values:** The reported energy values represent *mechanical work* (joules of torque×velocity integrated over time). Actual electrical consumption on real hardware would be **25–50% higher** due to motor inefficiencies, transmission losses, and servo electronics. This work is simulation-only; real validation would require hardware power measurement.
+> **Note on energy values:**
+> The above energy values represent *mechanical work* (calculated by integrating the product of torque and velocity over time). Actual electrical consumption on real hardware might be **20-40% higher** due to transmission losses, motor wear and tear, etc. Additionally, this work is simulation-only. Real world validation would require hardware power measurement.
 
 ---
 
 ## Unexpected Benefit: Smoother Motion
 
-Penalizing energy also penalizes jerky movements (high torque = high energy cost). The result: smoother trajectories for free.
+Penalizing energy also seems to penalize jerky movements (high torque = high energy cost).
+As a result, we get smoother trajectories for free.
 
 ![Peak torque by language command](images/peak_torque_comparison.png)
 
-Compared to standard RL training:
+Compared to standard RL training, we observe:
 - **80%+ reduction in jerk**
 - More predictable, human-like movements
 - Less mechanical wear
 
-No smoothness reward needed. Energy efficiency implies motion quality.
+No smoothness reward was needed. Energy efficiency implies motion quality.
 
 ---
 
@@ -116,7 +120,7 @@ No smoothness reward needed. Energy efficiency implies motion quality.
 
 **Energy constraints shape motion.** Limiting energy naturally produces smoother, safer movements with a single constraint.
 
-**Language is intuitive control.** Saying "carefully" beats tuning hyperparameters. Easier for users, works across tasks.
+**Language is intuitive control.** Saying "carefully" is easier than tuning hyperparameters. It's more intuitive and works across tasks.
 
 **Measure the tradeoffs.** Testing the full range reveals physical limits and guides deployment decisions (battery life, safety margins).
 
@@ -135,7 +139,7 @@ No smoothness reward needed. Energy efficiency implies motion quality.
 1. Define physics-based success criteria (avoid reward hacking)
 2. Add energy measurement to environment
 3. Train with different budgets, each paired with a language descriptor
-4. At test time: encode user command → policy adapts
+4. At test time: encode user command. Policy adapts accordingly.
 
 Works with other architectures too. The core ideas (reward design, constraints, language interface) are architecture-agnostic.
 
@@ -143,18 +147,16 @@ Works with other architectures too. The core ideas (reward design, constraints, 
 
 ## Closing Thoughts
 
-This started as an exploration: Can we make energy efficiency controllable through language? 
-The answer seems to be yes, at least in simulation.
+This project started as an exploration of a simple question: Can we make energy efficiency controllable through language? The answer seems to be yes, at least in simulation.
 
-The approach combines existing ideas (ECO's constrained optimization, language embeddings for conditioning) in a straightforward way. The interesting part is what falls out: one policy that adapts its energy use on command, smoother motion as a side effect, and a clear view of the success-efficiency tradeoff.
+This approach combines existing ideas (ECO's constrained optimization, language embeddings for conditioning) in a straightforward way. The interesting part is what unfolds: one policy that adapts its energy use on command, smoother motion as a side effect, and a clear view of the success-efficiency tradeoff.
 
-There's plenty left to explore: sim-to-real transfer, more complex language understanding, online budget adjustment. But the core lesson holds: energy efficiency and human control are design choices, not automatic benefits of better models.
-
+There's still plenty of room for improvement and exploration -- sim-to-real transfer, more complex language understanding, online budget adjustment to name a few. However, the main takeaway is that energy efficiency and human control can be design choices, and can be achieved with a single policy.
 ---
 
 ## Acknowledgments
 
-This project is heavily inspired by and builds upon the mathematical framework introduced in the paper [**ECO: Energy-Constrained Optimization with Reinforcement Learning for Humanoid Walking**](https://arxiv.org/abs/2602.06445) by Weidong Huang, Jingwen Zhang, Jiongye Li, Shibowen Zhang, Jiayang Wu, Jiayi Wang, Hangxin Liu, Yaodong Yang, and Yao Su. Their work provided the foundational Constrained MDP formulation and Lagrangian multiplier approach for enforcing dynamic energy budgets.
+This project is heavily inspired by and builds upon the mathematical framework introduced in the paper [**ECO: Energy-Constrained Optimization with Reinforcement Learning for Humanoid Walking**](https://arxiv.org/abs/2602.06445) by Weidong Huang, Jingwen Zhang, Jiongye Li, Shibowen Zhang, Jiayang Wu, Jiayi Wang, Hangxin Liu, Yaodong Yang, and Yao Su. Their work provided the foundational Constrained MDP formulation and Lagrangian multiplier approach for enforcing energy budgets.
 
 Thanks also to [Robosuite](https://robosuite.ai/) for creating an excellent manipulation interface with MuJoCo.
 
