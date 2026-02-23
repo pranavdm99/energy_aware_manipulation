@@ -1,6 +1,6 @@
 theme: jekyll-theme-slate
-title: Energy-Aware Robot Manipulation
-description: Teaching robots to balance task success with energy efficiency using natural language.
+title: Teaching Robots to Work Smart, Not Just Hard
+description: Energy-Aware Robot Manipulation - Balancing task success with energy efficiency using natural language.
 show_downloads: false
 github:
   is_project_page: false

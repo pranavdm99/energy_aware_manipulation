@@ -1,9 +1,3 @@
-# Teaching Robots to Work Smart, Not Just Hard
-
-*Exploring energy-efficient robot control with natural language commands.*
-
----
-
 ## The Problem
 
 Train a robot to open a door. It learns to succeed: by slamming into it with full force. Technically works. Practically useless.
@@ -163,3 +157,6 @@ There's plenty left to explore: sim-to-real transfer, more complex language unde
 This project is heavily inspired by and builds upon the mathematical framework introduced in the paper [**ECO: Energy-Constrained Optimization with Reinforcement Learning for Humanoid Walking**](https://arxiv.org/abs/2602.06445) by Weidong Huang, Jingwen Zhang, Jiongye Li, Shibowen Zhang, Jiayang Wu, Jiayi Wang, Hangxin Liu, Yaodong Yang, and Yao Su. Their work provided the foundational Constrained MDP formulation and Lagrangian multiplier approach for enforcing dynamic energy budgets.
 
 Thanks also to [Robosuite](https://robosuite.ai/) for creating an excellent manipulation interface with MuJoCo.
+
+> [!NOTE]
+> **Work in Progress:** This project is still in active development and the codebase will be made public soon!
