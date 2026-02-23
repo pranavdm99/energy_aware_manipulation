@@ -152,6 +152,7 @@ This project started as an exploration of a simple question: Can we make energy 
 This approach combines existing ideas (ECO's constrained optimization, language embeddings for conditioning) in a straightforward way. The interesting part is what unfolds: one policy that adapts its energy use on command, smoother motion as a side effect, and a clear view of the success-efficiency tradeoff.
 
 There's still plenty of room for improvement and exploration -- sim-to-real transfer, more complex language understanding, online budget adjustment to name a few. However, the main takeaway is that energy efficiency and human control can be design choices, and can be achieved with a single policy.
+
 ---
 
 ## Acknowledgments
