@@ -1,5 +1,7 @@
 # Energy-Aware, Language-Conditioned Manipulation
 
+[![Read the Blog](https://img.shields.io/badge/Read%20the-Blog-blue?style=for-the-badge&logo=ghost)](https://pranavdm99.github.io/energy_aware_manipulation/)
+
 This project involves training a **Franka Panda** arm in **Robosuite** (MuJoCo) to perform manipulation tasks while jointly optimizing **task success** and **mechanical energy efficiency**, with optional **language conditioning** for semantic modulation of motion style.
 
 ## Quick Start (Docker)
